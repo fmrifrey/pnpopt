@@ -6,7 +6,6 @@ noise_fac = 0.2; % noise factor
 
 % create the ground truth image
 x = phantom(N); % N x N shepp logan phantom
-RMSE_gt = @(x_est) sqrt(mean(vec(x - x_est).^2));
 
 % simulate a sensitivity map
 smap = mri_sensemap_sim('nx',N,'ncoil',nc);
@@ -32,47 +31,43 @@ y = y + noise;
 x0 = FS' * (w.*y); % with density compensation for initialization
 x0 = ir_wls_init_scale(FS, y, x0); % fix scale
 
-figure
-imagesc(abs(x0)); axis off
-title(sprintf('initial estimate\nRMSE = %g',RMSE_gt(x0)));
-
 %% solve with unregularized CG
 niter = 20;
-[x_star,cost] = slv.CG(x0,FS,y,'niter',niter);
-
-figure
-subplot(2,1,1)
-imagesc(abs(x_star)); axis off
-title(sprintf('Unregularized CG\n(%d iterations)\nRMSE = %g',niter,...
-    RMSE_gt(x_star)));
-subplot(2,1,2)
-plot(0:niter,cost); xlabel('iteration #'); ylabel('cost');
-drawnow
+slv.CG(x0,FS,y,'niter',niter,...
+    'update_fun',@(itr,cost,x_star,time_itr)plot_iteration(112,x,x0,itr,cost,x_star,time_itr));
 
 %% solve with TV-nlCG
 niter = 20;
-R = reg.TV(1e-3,'l1'); % spatial total variation (no dim specified)
-[x_star,cost] = slv.nlCG(x0,FS,y,'niter',niter,'R',R);
-
-figure
-subplot(2,1,1)
-imagesc(abs(x_star)); axis off
-title(sprintf('TV-regularized nlCG\n(%d iterations)\nRMSE = %g',niter,...
-    RMSE_gt(x_star)));
-subplot(2,1,2)
-plot(0:niter,cost); xlabel('iteration #'); ylabel('cost');
-drawnow
+R = reg.TV(1e-3); % spatial total variation (no dim specified)
+slv.nlCG(x0,FS,y,'niter',niter,'R',R,...
+    'update_fun',@(itr,cost,x_star,time_itr)plot_iteration(112,x,x0,itr,cost,x_star,time_itr));
 
 %% solve with TV-FISTA 
-niter = 20;
-R = reg.TV(1e-3,'l1'); % spatial total variation (no dim specified)
-[x_star,cost] = slv.FISTA(x0,FS,y,'niter',niter,'R',R);
+niter = 100;
+R = reg.TV(1e-3); % spatial total variation (no dim specified)
+[x_star,cost] = slv.FISTA(x0,FS,y,'niter',niter,'R',R,...
+    'update_fun',@(itr,cost,x_star,time_itr)plot_iteration(111,x,x0,itr,cost,x_star,time_itr));
 
-figure
-subplot(2,1,1)
-imagesc(abs(x_star)); axis off
-title(sprintf('TV-FISTA\n(%d iterations)\nRMSE = %g',niter,...
-    RMSE_gt(x_star)));
-subplot(2,1,2)
-plot(0:niter,cost); xlabel('iteration #'); ylabel('cost');
-drawnow
+function plot_iteration(fnum,x,x0,itr,cost,x_star,time_itr)
+    
+    RMSE_gt0 = sqrt(mean((x(:) - x0(:)).^2));
+    RMSE_gt = sqrt(mean((x(:) - x_star(:)).^2));
+
+    figure(fnum)
+
+    subplot(3,1,1)
+    imagesc(abs(x0)); axis off
+    title(sprintf('Initial estimate\nRMSE = %g',RMSE_gt0));
+
+    subplot(3,1,2)
+    imagesc(abs(x_star)); axis off
+    title(sprintf('Iteration solution\nRMSE = %g',RMSE_gt));
+
+    subplot(3,1,3)
+    plot(0:itr,cost(1:itr+1)); xlabel('iteration #'); ylabel('cost');
+
+    sgtitle(sprintf('Iteration %d, time = %gs',itr,time_itr))
+
+    drawnow
+
+end

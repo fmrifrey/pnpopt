@@ -19,10 +19,10 @@ classdef L2
             x_p = x / (1 + obj.lam);
         end
 
-        function n = norm(~,x)
+        function n = norm(obj,x)
             % computes the L2 norm of x
             % i.e. ||x||_2
-            n = norm(x(:),2);
+            n = obj.lam*norm(x(:),2);
         end
 
     end

@@ -8,7 +8,7 @@ function [x_star, cost] = nlCG(x0, A, b, varargin)
     defaults.alpha = 0.01; % step size factor for line search
     defaults.beta = 0.8; % step size factor for line search
     defaults.t0 = 0.0001; % initial step size
-    defaults.talk2me = 1; % option to print update messages
+    defaults.update_fun = []; % iteration update fun
 
     % parse inputs
     args = vararg_pair(defaults,varargin);
@@ -24,10 +24,10 @@ function [x_star, cost] = nlCG(x0, A, b, varargin)
         % add regularization norms
         if ~isempty(args.R) && iscell(args.R)
             for i = 1:length(R)
-                c = c + args.R{i}.lam * args.R{i}.norm(x);
+                c = c + args.R{i}.norm(x);
             end
         elseif ~isempty(args.R)
-            c = c + args.R.lam * args.R.norm(x);
+            c = c + args.R.norm(x);
         end
     end
 
@@ -37,11 +37,6 @@ function [x_star, cost] = nlCG(x0, A, b, varargin)
     f0 = cost_fun(x_star); % initial objective function value
     dx = -g0; % initial search direction = negative gradient
     cost(1) = f0;
-
-    % print update
-    if args.talk2me
-        fprintf('nlCG initialization, cost = %g\n', cost(1));
-    end
 
     for n = 1:args.niter
         time_itr = tic; % start timer
@@ -103,11 +98,9 @@ function [x_star, cost] = nlCG(x0, A, b, varargin)
         dx = -g1 + b_k*dx;
 
         % print update
-        if args.talk2me
+        if ~isempty(args.update_fun)
             time_itr = toc(time_itr); % stop the clock
-            fprintf('nlCG iteration %d/%d', n, args.niter);
-            fprintf(', cost = %g', cost(n+1));
-            fprintf(', iteration time = %.3fs\n', time_itr);
+            args.update_fun(n,cost,x_star,time_itr);
         end
 
         % set a variable called "exititr" to exit at current iteration

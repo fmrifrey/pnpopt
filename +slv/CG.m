@@ -3,7 +3,7 @@ function [x_star,cost] = CG(x0, A, b, varargin)
     % set defaults
     defaults.niter = 5; % number of iterations
     defaults.R = []; % regularizers
-    defaults.talk2me = 1; % option to print update messages
+    defaults.update_fun = []; % iteration update fun
     
     % parse inputs
     args = vararg_pair(defaults,varargin);
@@ -19,10 +19,10 @@ function [x_star,cost] = CG(x0, A, b, varargin)
         % add regularization norms
         if ~isempty(args.R) && iscell(args.R)
             for i = 1:length(R)
-                c = c + args.R{i}.lam * args.R{i}.norm(x);
+                c = c + args.R{i}.norm(x);
             end
         elseif ~isempty(args.R)
-            c = c + args.R.lam * args.R.norm(x);
+            c = c + args.R.norm(x);
         end
     end
 
@@ -31,11 +31,6 @@ function [x_star,cost] = CG(x0, A, b, varargin)
     r = reshape(A'*(b - A*x_star), size(x_star)); % residual
     p = r; % initial search direction = residual
     cost(1) = cost_fun(x_star);
-
-    % print update
-    if args.talk2me
-        fprintf('CG initialization, cost = %g\n', cost(1));
-    end
 
     for n = 1:args.niter
         time_itr = tic; % start timer
@@ -68,11 +63,9 @@ function [x_star,cost] = CG(x0, A, b, varargin)
         time_itr = time_itr - toc(time_cost); % remove cost from total time
 
         % print update
-        if args.talk2me
+        if ~isempty(args.update_fun)
             time_itr = toc(time_itr); % stop the clock
-            fprintf('CG iteration %d/%d', n, args.niter);
-            fprintf(', cost = %g', cost(n+1));
-            fprintf(', iteration time = %.3fs\n', time_itr);
+            args.update_fun(n,cost,x_star,time_itr);
         end
 
         % set a variable called "exititr" to exit at current iteration

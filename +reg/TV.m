@@ -3,11 +3,10 @@ classdef TV
     properties
         lam % lagrange multiplier for TV regularization
         type % TV norm type (L1 or iso)
-        dim % dimensions of TV regularization
     end
     
     methods
-        function obj = TV(lam,type,dim)
+        function obj = TV(lam,type)
             % constructor function for TV regularizer
 
             % set labmda
@@ -22,12 +21,6 @@ classdef TV
             end
             obj.type = type;
 
-            % set TV dimensions
-            if nargin < 3
-                dim = [];
-            end
-            obj.dim = dim;
-
         end
         
         function x_p = prox(obj,x,niter)
@@ -40,13 +33,24 @@ classdef TV
                 nd = 1;
             end
 
+            % if lam is a scalar, apply it to all dimensions
+            if length(obj.lam)==1
+                obj.lam = obj.lam*ones(1,nd);
+            elseif length(obj.lam)~=nd
+                error('lam must be 1xnd or a scalar for all dimensions')
+            end
+            obj.lam(obj.lam==0) = eps; % protection from divide by 0
+
             % set default niter to 5
             if nargin < 3 || isempty(niter)
                 niter = 50;
             end
 
             % initialize variables
-            P = L_adj(x,obj.dim);
+            P = cell(nd,1); % finite difference images
+            for d = 1:nd
+                P{d} = L_adj(x,d);
+            end
             R = P;
             t_k_1 = 1;
 
@@ -57,21 +61,24 @@ classdef TV
                 P_old = P;
                 t_k = t_k_1;
 
-                % compute gradient of objective fun
-                D = x - obj.lam*L_fwd(R,obj.dim);
-                Q = L_adj(D,obj.dim);
+                % compute the gradient
+                D = x;
+                for d = 1:nd % loop through dimensions
+                    D = D - obj.lam(d)*L_fwd(R{d},d);
+                end
 
                 % take a step towards negative of the gradient
                 for d = 1:nd
-                    P{d} = R{d} + 1/(4*nd*obj.lam)*Q{d};
+                    Qd = L_adj(D,d);
+                    P{d} = R{d} + 1/(4*nd*obj.lam(d))*Qd;
                 end
 
                 % calculate projection
                 switch obj.type
                     case 'iso'
-                        P = prox_iso(P,sz,nd);
+                        P = project_iso(P,sz);
                     case 'l1'
-                        P = prox_l1(P,nd);
+                        P = project_l1(P);
                     otherwise
                         error('invalid type: %s',obj.type);
                 end
@@ -83,10 +90,14 @@ classdef TV
                 for d = 1:nd
                     R{d} = P{d} + (t_k-1)/t_k_1 * (P{d} - P_old{d});
                 end
+
             end
 
-            % calculate Y
-            x_p = x - obj.lam*L_fwd(P,obj.dim);
+            % calculate x_p
+            x_p = x;
+            for i = 1:d
+                x_p = x - obj.lam(d)*L_fwd(P{d},d);
+            end
 
         end
 
@@ -94,9 +105,9 @@ classdef TV
             % function to calculate TV norm
             switch obj.type
                 case 'iso'
-                    n = tvnorm_iso(x,obj.dim);
+                    n = tvnorm_iso(x,obj.lam);
                 case 'l1'
-                    n = tvnorm_l1(x,obj.dim);
+                    n = tvnorm_l1(x,obj.lam);
                 otherwise
                     error('invalid type: %s',obj.type);
             end
@@ -104,172 +115,118 @@ classdef TV
     end
 end
 
-%% define finite differencing operators L and L':
+%% define finite differencing operators L and L^T:
+% reference section 4A in:
+% Beck and Teboulle, “Fast Gradient-Based Algorithms for Constrained Total
+% Variation Image Denoising and Deblurring Problems.”
+%
+% here, P is the set of finite difference matrices
+% i.e. for 2D case: P = {p_ij, q_ij}, where
+% p_ij = x_ij - x_i+1,j, i = 1, ..., m-1, j = 1, ..., n
+% q_ij = x_ij - x_i,j+1, i = 1, ..., m, j = 1, ..., n-1
+%
+% matrix D is one of these "finite difference" matrices for a given
+% dimension dim
+% i.e. D_1 = L_adj(x,1) = x_ij - x_i+1,j; D_2 = L_fwd(x,2) = x_ij - x_i,j+1
 
-function x = L_fwd(P,dim)
-% P = cell array of projection matrices for each dimension
-% dim = dimensions to apply finite differencing
-    
-    % set defaults dims to all
-    nd = length(P);
-    if nargin < 2 || isempty(dim)
-        dim = 1:nd;
-    end
+function D = L_adj(x,dim)
+    % zero-pad differencing dimension
+    padsz = zeros(ndims(x),1);
+    padsz(dim) = 1;
 
-    % get size
-    sz = size(P{1});
-    if dim(1) == 1
-        sz(1) = sz(1)+1; % first dimension will be differenced - add 1
-    end
+    % compute finite difference along dimension dim
+    D = padarray(-diff(x,1,dim), padsz, 0, 'post');
+end
 
-    % initialize image
+function x = L_fwd(D, dim)
+    % get size of x
+    sz = size(D);
+
+    % get indicies for addition and subtraction
+    idx1 = repmat({':'}, 1, ndims(D));
+    idx1{dim} = 1:sz(dim)-1;
+    idx2 = idx1;
+    idx2{dim} = idx1{dim}+1;
+
+    % back-calculate x from finite difference operators
     x = zeros(sz);
-    idcs1 = cell(nd,1);
-    idcs2 = cell(nd,1);
+    x(idx1{:}) = x(idx1{:}) + D(idx1{:});
+    x(idx2{:}) = x(idx2{:}) - D(idx1{:});
+end
 
-    % loop through dimensions
-    for d1 = dim
-        % get indicies for addition and subtraction
-        for d2 = 1:nd
-            if d1 == d2
-                idcs1{d2} = 1:sz(d2)-1;
-                idcs2{d2} = 2:sz(d2);
-            else
-                idcs1{d2} = 1:sz(d2);
-                idcs2{d2} = 1:sz(d2);
-            end
-        end
+%% define projection steps for iso and l1 TV
+% reference remark 4.2 in:
+% Beck and Teboulle, “Fast Gradient-Based Algorithms for Constrained Total
+% Variation Image Denoising and Deblurring Problems.”
 
-        % calculate
-        % L(p,q)_i,j = p_i,j + q_i,j - p_i-1,j - q_i-1,j
-        x(idcs1{:}) = x(idcs1{:}) + P{d1};
-        x(idcs2{:}) = x(idcs2{:}) - P{d1};
+function P_proj = project_l1(P)
+    % project onto set P1:
+    % 2D case: P = {p,q} --> P1 = {r,s}, where
+    % r_ij = p_ij / max{1,|p_ij|}
+    % s_ij = q_ij / max{1,|q_ij|}
+
+    P_proj = cell(size(P));
+
+    % L1 projection
+    for d = 1:length(P)
+        P_proj{d} = P{d} ./ max(1,abs(P{d}));
     end
 
 end
 
-function P = L_adj(x, dim)
-% x = image of any dimensions
-% dim = dimensions to apply finite differencing
+function P_proj = project_iso(P)
+    % project onto set P1:
+    % 2D case: P = {p,q} --> P1 = {r,s}, where
+    % r_ij = p_ij / max{1,sqrt( p_ij^2 + q_ij^2 )}
+    % s_ij = q_ij / max{1,sqrt( p_ij^2 + q_ij^2 )}
 
-    % get size
-    sz = size(x);
-    nd = ndims(x);
+    P_proj = cell(size(P));
 
-    % set defaults dims to all
-    if nargin < 2 || isempty(dim)
-        dim = 1:nd;
+    % compute sum of squares of P
+    P_sos = zeros(size(P{1}));
+    for d = 1:length(P)
+        P_sos = P_sos + P{d}.^2;
     end
 
-    % initialize cell array of finite diff matrices
-    P = cell(nd,1);
-    
-    % loop through dimensions
-    for d = 1:nd
-        if ismember(d,dim)
-            % calculate L'(x) = {p,q}
-            % p_i,j = x_i,j - x_i+1,j
-            % q_i,j = x_i,j - x_i,j+1
-            P{d} = -diff(x,1,d);
-        else
-            P{d} = zeros(sz);
-        end
-    end
-
-end
-
-%% define proximal operators for iso and l1 TV
-
-function P = prox_iso(P,sz,nd)
-
-    % loop through dimensions
-    A = zeros(sz); % root sum of squares
-    for d = 1:nd
-        padsz = zeros(nd,1);
-        padsz(d) = size(A,d) - size(P{d},d);
-
-        % add square of P to A
-        A = A + padarray(P{d},padsz,0,'post').^2;
-    end
-
-    % take root of sum of squares
-    A = sqrt(max(A,1));
-
-    % loop through dimensions
-    idcs = cell(nd,1);
-    for d1 = 1:length(P)
-
-        % get indicies for addition and subtraction
-        for d2 = 1:nd
-            if d1 == d2
-                idcs{d2} = 1:sz(d2)-1;
-            else
-                idcs{d2} = 1:sz(d2);
-            end
-        end
-
-        % divide P by rsos
-        P{d1} = P{d1}./A(idcs{:});
-    end
-
-end
-
-function P = prox_l1(P,nd)
-    
-    % loop through dimensions
-    for d = 1:nd
-        % divide P by absolute max
-        P{d} = P{d} ./ (sign(P{d}) .* max(abs(P{d}), 1));
+    % isotropic projection
+    for d = 1:length(P)
+        P_proj{d} = P{d} ./ max(1,sqrt(P_sos));
     end
 
 end
 
 %% define norms for l1 and iso TV
+% reference problem 2.2 in:
+% Beck and Teboulle, “Fast Gradient-Based Algorithms for Constrained Total
+% Variation Image Denoising and Deblurring Problems.”
+%
+% here, TV_I represents the isotropic TV norm, and TV_L1 the l1-based
+% anisotropic TV norm
+% i.e. for the 2D case:
+% TV_I(x) = sum_all(sqrt(sum{P_d^2, for d = 1:2}))
+% TV_L1(x) = sum_all(sum{abs(P_d), for d = 1:2})
 
-function tv = tvnorm_iso(x,dim)
+function TV_I = tvnorm_iso(x,lam)
 
-    % get size
-    sz = size(x);
-    nd = ndims(x);
-    if (nd==2 && sz(2)==1)
-        nd = 1;
-    end
-
-    % calculate projection operators
-    P = L_adj(x,dim);
-
-    % loop through dimensions
-    D = zeros(sz); % sum of squares matrix
-    for d = 1:nd
-        padsz = zeros(nd,1);
-        padsz(d) = size(D,d) - size(P{d},d);
-
-        % add its square to D
-        D = D + padarray(P{d},padsz,0,'post').^2;
+    % compute sum of squares of P
+    P_sos = zeros(length(lam),1);
+    for d = 1:length(lam)
+        P_d = L_adj(x,d);
+        P_sos = P_sos + lam(d)*P_d.^2;
     end
 
     % calculate norm
-    tv = sum(sqrt(D),'all');
+    TV_I = sum(vec(sqrt(P_sos)));
 
 end
 
-function tv = tvnorm_l1(x,dim)
+function TV_L1 = tvnorm_l1(x,lam)
 
-    % get size
-    sz = size(x);
-    nd = ndims(x);
-    if (nd==2 && sz(2)==1)
-        nd = 1;
-    end
-
-    % calculate projection operators
-    P = L_adj(x,dim);
-
-    % loop through dimensions
-    tv = 0;
-    for d = 1:nd
-        % add l1 norm
-        tv = tv + sum(abs(P{d}),'all');
+    % compute sum of absolute values as norm
+    TV_L1 = 0;
+    for d = 1:length(lam)
+        P_d = L_adj(x,d);
+        TV_L1 = TV_L1 + lam(d)*sum(abs(P_d(:)));
     end
     
 end

@@ -19,10 +19,10 @@ classdef L1
             x_p = sign(x) .* max(abs(x) - obj.lam, 0);
         end
 
-        function n = norm(~, x)
+        function n = norm(obj, x)
             % computes the L1 norm of x
             % i.e. ||x||_1
-            n = sum(abs(x(:)));
+            n = obj.lam*sum(abs(x(:)));
         end
     end
 end
