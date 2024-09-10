@@ -23,7 +23,7 @@ function [x_star, cost] = nlCG(x0, A, b, varargin)
 
         % add regularization norms
         if ~isempty(args.R) && iscell(args.R)
-            for i = 1:length(R)
+            for i = 1:length(args.R)
                 c = c + args.R{i}.norm(x);
             end
         elseif ~isempty(args.R)

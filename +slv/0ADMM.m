@@ -1,12 +1,10 @@
-% THIS CODE IS STILL IN PROGRESS!!
-
 function [x_star, cost] = ADMM(x0, A, b, varargin)
 
     % set defaults
     defaults.niter = 10; % number of iterations
     defaults.R = []; % regularizers
     defaults.rho = 1.0; % ADMM parameter
-    defaults.talk2me = 1; % option to print update messages
+    defaults.update_fun = []; % iteration udpate fun
 
     % parse inputs
     args = vararg_pair(defaults, varargin);
@@ -21,36 +19,38 @@ function [x_star, cost] = ADMM(x0, A, b, varargin)
 
         % add regularization norms
         if ~isempty(args.R) && iscell(args.R)
-            for i = 1:length(R)
-                c = c + args.R{i}.lam * args.R{i}.norm(x);
+            for i = 1:length(args.R)
+                c = c + args.R{i}.norm(x);
             end
         elseif ~isempty(args.R)
-            c = c + args.R.lam * args.R.norm(x);
+            c = c + args.R.norm(x);
         end
     end
 
     % initialize variables
     x_star = x0;
-    z = zeros(size(x0)); % auxiliary variable
-    u = zeros(size(x0)); % dual variable
+    z = zeros(size(b)); % auxiliary variable
+    u = zeros(size(b)); % dual variable
     cost(1) = cost_fun(x_star);
 
-    for iter = 1:args.niter
+    for n = 1:args.niter
         time_itr = tic; % Start timer
 
-        % update x_star (primal variable)
-        if ismatrix(A) % gram can be calculated explicitly
-            x_star = (A' * A + args.rho * eye(size(A, 2))) \ ...
-                (A' * b + args.rho * (z - u));
-        else % gram must be solved for with CG
-
-        end
+        % primal update
+	    x_star = slv.CG(x0,A,b+u);
 
         % update auxiliary variable
-        if ~isempty(args.prox_g)
-            z = args.prox_g(x_star + u);
+        z = x_star + u;
+        
+        % apply the regularization
+        if ~isempty(args.R) && iscell(args.R) % for multiple regularizers
+            for j = 1:length(args.R)
+                z = args.R{j}.prox(z);
+            end
+        elseif ~isempty(args.R) % for a single regularizer
+            z = args.R.prox(z);
         end
-
+        
         % update dual variable
         u = u + x_star - z;
 
@@ -60,11 +60,15 @@ function [x_star, cost] = ADMM(x0, A, b, varargin)
         time_itr = time_itr - toc(time_cost); % remove cost from total time
 
         % print update
-        if args.talk2me
+        if ~isempty(args.update_fun)
             time_itr = toc(time_itr); % stop the clock
-            fprintf('ADMM iteration %d/%d', iter, args.niter);
-            fprintf(', cost = %g', cost(n+1));
-            fprintf(', iteration time = %.3fs\n', time_itr);
+            args.update_fun(n,cost,x_star,time_itr);
+        end
+
+        % set a variable called "exititr" to exit at current iteration
+        % when debugging
+        if exist('exititr','var')
+            break 
         end
 
     end
