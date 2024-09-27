@@ -36,11 +36,11 @@ function [x_star, cost] = ADMM(x0, A, b, varargin)
     for n = 1:args.niter
         time_itr = tic; % Start timer
 
-        % primal update
-	    x_star = slv.CG(x0,A,b+u);
+        % primal update (to do)
+	    
 
         % update auxiliary variable
-        z = x_star + u;
+        z = x_star + args.rho*u;
         
         % apply the regularization
         if ~isempty(args.R) && iscell(args.R) % for multiple regularizers

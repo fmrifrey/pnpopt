@@ -48,6 +48,12 @@ R = reg.TV(1e-3); % spatial total variation (no dim specified)
 [x_star,cost] = slv.FISTA(x0,FS,y,'niter',niter,'R',R,...
     'update_fun',@(itr,cost,x_star,time_itr)plot_iteration(111,x,x0,itr,cost,x_star,time_itr));
 
+%% solve with Wavelet-FISTA
+niter = 100;
+R = reg.WavL1(1e-3); % spatial total variation (no dim specified)
+[x_star,cost] = slv.FISTA(x0,FS,y,'niter',niter,'R',R,...
+    'update_fun',@(itr,cost,x_star,time_itr)plot_iteration(111,x,x0,itr,cost,x_star,time_itr));
+
 function plot_iteration(fnum,x,x0,itr,cost,x_star,time_itr)
     
     RMSE_gt0 = sqrt(mean((x(:) - x0(:)).^2));
